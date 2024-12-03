@@ -1,4 +1,4 @@
-use crate::gstreamer_internals::prober::Probe;
+use crate::gstreamer_internals::prober::{Probe, TaskOrData};
 use crate::gstreamer_internals::update::Update;
 use anyhow::Result;
 use crossbeam_channel::{Receiver};
@@ -8,10 +8,11 @@ use gstreamer_app::AppSink;
 use std::time::Duration;
 
 pub struct GstreamerBackend {
+   pub uri: String,
    pub pipeline: Pipeline,
    pub appsink: AppSink,
    pub update_receiver: Receiver<Update>,
-   pub probe: Option<Probe>,
+   pub probe: TaskOrData<Result<Probe>>,
    pub force_frame_update: bool,
 }
 
@@ -23,10 +24,10 @@ impl Drop for GstreamerBackend {
 
 /// Constructors and update
 impl GstreamerBackend {
-   pub fn init(uri: String) -> Result<Self> {
+   pub fn init(uri: &str) -> Result<Self> {
       gstreamer::init()?;
 
-      let (pipeline, appsink) = Self::create_playbin_pipeline(uri)?;
+      let (pipeline, appsink) = Self::create_playbin_pipeline(&uri)?;
 
       let (update_sender, update_receiver) = crossbeam_channel::bounded::<Update>(2);
 
@@ -71,22 +72,26 @@ impl GstreamerBackend {
          println!("Closing message bus for gstreamer backend");
       });
 
+      let mut probe_task = TaskOrData::without_data();
+      let cpy = uri.to_string();
+      probe_task.start_task(move || Probe::from_uri(cpy.as_str()));
 
       Ok(Self {
+         uri: uri.to_string(),
          pipeline,
          appsink,
          update_receiver,
-         probe: None,
+         probe: probe_task,
          force_frame_update: false,
       })
    }
 
-   fn create_playbin_pipeline(uri: String) -> Result<(Pipeline, AppSink)> {
+   fn create_playbin_pipeline(uri: &str) -> Result<(Pipeline, AppSink)> {
       // init
       let pipeline: Pipeline = ElementFactory::make("playbin").build()?.dynamic_cast::<Pipeline>().unwrap();
 
       // file
-      pipeline.set_property("uri", &uri);
+      pipeline.set_property("uri", uri);
 
       // sink TODO hardware acc
       let appsink = ElementFactory::make("appsink")
@@ -126,7 +131,9 @@ impl GstreamerBackend {
             }
          }
       }
-      else { Ok(self.update_receiver.try_recv()?) }
+      else {
+         Ok(self.update_receiver.try_recv()?)
+      }
    }
 }
 

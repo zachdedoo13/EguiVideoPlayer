@@ -10,6 +10,15 @@ pub mod gstreamer_internals {
     pub mod prober;
 }
 
+pub mod gui {
+    pub mod player;
+}
+
+pub mod wgpu {
+    pub mod pack;
+    pub mod display_texture;
+}
+
 
 // helper functions
 pub fn path_to_uri(path: &Path) -> anyhow::Result<String> {

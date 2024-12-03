@@ -3226,6 +3226,7 @@ dependencies = [
  "bytemuck",
  "crossbeam-channel",
  "eframe",
+ "either",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-pbutils",

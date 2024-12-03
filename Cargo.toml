@@ -3,6 +3,10 @@ name = "vid_v2"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "test_app"
+path = "src/app.rs"
+
 [dependencies]
 gstreamer = { version = "0.23.3", features = ["v1_24"] }
 gstreamer-app = { version = "0.23.3", features = ["v1_24"] }
@@ -20,5 +24,7 @@ lazy_bastard = "0.1.6"
 crossbeam-channel = "0.5.13"
 
 log = "0.4.22"
+
+either = "1.13.0"
 
 url = "2.5.4"

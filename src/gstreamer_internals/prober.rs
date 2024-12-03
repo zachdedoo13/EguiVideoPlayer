@@ -1,8 +1,11 @@
+use std::thread;
 use anyhow::Result;
 use gstreamer::tags::{AudioCodec, Bitrate, Title, VideoCodec};
 use gstreamer::ClockTime;
 use gstreamer_pbutils::prelude::DiscovererStreamInfoExt;
 use gstreamer_pbutils::Discoverer;
+use std::thread::JoinHandle;
+use either::Either::{self, Left, Right};
 
 // helper functions
 #[derive(Debug)]
@@ -96,8 +99,145 @@ impl Probe {
 
       Ok(out)
    }
+
+   pub fn from_uri_future(uri: &str) -> JoinHandle<Result<Probe>> {
+      let uri = uri.to_string();
+      let handle = std::thread::spawn(move || {
+         Probe::from_uri(uri.as_str())
+      });
+      handle
+   }
 }
 
+
+
+
+pub enum PollRes<T> {
+   NotInitialized,
+   InProgress,
+   Available(T),
+   JustBecameAvailable(T),
+}
+
+pub struct TaskOrData<R: Send + 'static> {
+   pub inner: Option<Either<R, JoinHandle<R>>>,
+   pub data_has_been_checked: bool,
+}
+
+impl<R: Send + 'static> Default for TaskOrData<R> {
+   fn default() -> Self {
+      Self {
+         inner: None,
+         data_has_been_checked: false,
+      }
+   }
+}
+
+impl<R: Send + 'static> TaskOrData<R> {
+   /// init with set data
+   #[must_use]
+   pub fn with_data(start_data: R) -> Self {
+      Self {
+         inner: Some(Left(start_data)),
+         data_has_been_checked: false,
+      }
+   }
+
+   /// init with no data, just routes to `TaskOrData::default`
+   #[must_use]
+   pub fn without_data() -> Self {
+      Self::default()
+   }
+
+   pub fn start_task<F>(&mut self, func: F)
+   where
+       F: FnOnce() -> R + Send + 'static,
+       R: Send + 'static,
+   {
+      // kill old processes
+      if let Some(Right(_)) = &self.inner {
+         // No need to abort, just drop the handle
+         self.inner = None;
+      }
+
+      // start new processes
+      let new: JoinHandle<R> = thread::spawn(func);
+
+      self.inner = Some(Right(new));
+   }
+
+   /// checks if the future is done, returns an error if fails and sets the inner data back to none
+   pub fn poll(&mut self) -> Result<(), Box<dyn std::any::Any + Send>> {
+      if let Some(Right(in_progress)) = &mut self.inner {
+         if in_progress.is_finished() {
+            if let Some(join_handle) = self.inner.take() {
+               if let Right(join_handle) = join_handle {
+                  let fin: Result<R, Box<dyn std::any::Any + Send>> = join_handle.join();
+                  return match fin {
+                     Ok(fin_data) => {
+                        self.inner = Some(Left(fin_data));
+                        Ok(())
+                     }
+                     Err(e) => {
+                        self.inner = None;
+                        Err(e)
+                     }
+                  };
+               }
+            }
+         }
+      }
+      Ok(())
+   }
+
+   pub fn check(&mut self) -> PollRes<&R> {
+      match &self.inner {
+         None => {
+            self.data_has_been_checked = false;
+            PollRes::NotInitialized
+         }
+         Some(either) => match either {
+            Left(fin) => {
+               if !self.data_has_been_checked {
+                  self.data_has_been_checked = true;
+                  PollRes::JustBecameAvailable(fin)
+               } else {
+                  PollRes::Available(fin)
+               }
+            }
+               Right(_) => {
+               self.data_has_been_checked = false;
+               PollRes::InProgress
+            }
+         },
+      }
+   }
+
+   pub fn check_mut(&mut self) -> PollRes<&mut R> {
+      match &mut self.inner {
+         None => PollRes::NotInitialized,
+         Some(either) => match either {
+            Left(fin) => PollRes::Available(fin),
+            Right(_) => PollRes::InProgress,
+         },
+      }
+   }
+
+   pub fn is_running_task(&self) -> bool {
+      if let Some(either) = &self.inner {
+         return either.is_right();
+      }
+      false
+   }
+
+   pub fn is_init(&self) -> bool {
+      self.inner.is_some()
+   }
+
+   pub fn reset(&mut self) {
+      self.inner = None;
+   }
+}
 
 #[cfg(test)]
 mod tests {
