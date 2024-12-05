@@ -1,12 +1,16 @@
+use std::sync::{Arc, RwLock};
 use crate::gstreamer_internals::player_backend::GstreamerBackend;
 use crate::wgpu::display_texture::WgpuEguiDisplayTexture;
 use crate::wgpu::pack::WgpuRenderPack;
 use anyhow::Result;
 use eframe::egui;
 use eframe::egui::panel::TopBottomSide;
-use eframe::egui::{CentralPanel, Frame, ImageSource, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
+use eframe::egui::{CentralPanel, Frame, ImageSource, Key, PointerButton, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
 use eframe::egui::load::SizedTexture;
+use egui_logger::EguiLogger;
+use gstreamer::ClockTime;
 use lazy_bastard::lazy_bastard;
+use log::{debug, Level, Log, Record};
 use crate::gstreamer_internals::prober::Probe;
 
 lazy_bastard!(
@@ -43,7 +47,7 @@ pub struct VidioPlayer {
 impl VidioPlayer {
    pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
       let mut backend = GstreamerBackend::init(&*crate::URI_PATH_FRIEREN).unwrap();
-      backend.start().unwrap();
+      backend.force_update_now(true).unwrap();
 
       Self {
          backend: Some(backend),
@@ -140,10 +144,12 @@ impl VidioPlayer {
 
       match self.temp_settings.is_fullscreen {
          true => {
-            self.player_ui(ui, ui.ctx().screen_rect());
+            self.player_ui(ui, ui.available_rect_before_wrap());
          }
          false => {
-            self.player_ui(ui, ui.available_rect_before_wrap());
+            self.top_ui(ui);
+            self.bottom_ui(ui);
+            self.player_ui(ui, ui.ctx().screen_rect());
          }
       }
    }
@@ -213,6 +219,15 @@ impl VidioPlayer {
             todo!()
          }
       });
+
+      if ui.button("Fullscreen").clicked() {
+         self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
+      }
+
+      if ui.button("Test").clicked() {
+         self.mut_backend().seek_normal(ClockTime::from_seconds_f64(120.0)).unwrap();
+         self.mut_backend().queue_forced_update();
+      }
    }
 
    /// TODO funky
@@ -246,38 +261,49 @@ impl VidioPlayer {
 
    fn player_interaction(&mut self, ui: &mut Ui, resp: Response) {
       if resp.double_clicked() {
-         match self.get_backend().is_paused {
-            true => {
-               self.mut_backend().start().unwrap();
-            }
-            false => {
-               self.mut_backend().stop().unwrap();
+         self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
+      }
+
+      // keyboard input
+      ui.ctx().input(|i| {
+         if i.key_pressed(Key::Space) {
+            match self.get_backend().is_paused {
+               true => {
+                  self.mut_backend().start().unwrap();
+               }
+               false => {
+                  self.mut_backend().stop().unwrap();
+               }
             }
          }
+      });
+
+      if resp.hovered() {
+         ui.ctx().input(|i| {
+            let raw_spd = i.raw_scroll_delta.y;
+            let unit = raw_spd / 40.0;
+
+            if unit != 0.0 {
+               // let digit = (unit * 0.01) * self.saved.scroll_speed_mult;
+               // if let Ok(c) = self.raw.gstreamer_player.get_volume() {
+               //    let set = (c + digit as f64).clamp(0.0, 1.0);
+               //    self.saved.volume = set as f32;
+               //    self.raw.gstreamer_player.set_volume(set).unwrap();
+               // }
+               todo!()
+            }
+         });
       }
+
+
+
+      resp.context_menu(|ui| {
+         ui.set_max_width(75.0);
+         self.menubar(ui, true);
+      });
    }
 
    fn player_ui(&mut self, ui: &mut Ui, major_rect: Rect) {
-      TopBottomPanel::new(TopBottomSide::Top, "top").show_inside(ui, |ui| {
-         self.menubar(ui, false);
-      });
-
-      TopBottomPanel::new(TopBottomSide::Bottom, "bottom").show_inside(ui, |ui| {
-         ui.horizontal(|ui| {
-            if ui.button("SwitchFullscreenState").clicked() {
-               self.set_fullscreen(!self.temp_settings.is_fullscreen);
-            };
-
-            if ui.button("Play").clicked() {
-               self.mut_backend().start().unwrap();
-            }
-
-            if ui.button("Pause").clicked() {
-               self.mut_backend().stop().unwrap();
-            }
-         })
-      });
-
       CentralPanel::default().frame(Frame::none()).show_inside(ui, |ui| {
          let resp_rect = ui.available_rect_before_wrap();
          if let Some(inner) = &self.display_texture.inner {
@@ -310,6 +336,30 @@ impl VidioPlayer {
             focusable: false,
          });
          self.player_interaction(ui, resp);
+      });
+   }
+
+   fn top_ui(&mut self, ui: &mut Ui) {
+      TopBottomPanel::new(TopBottomSide::Top, "top").show_inside(ui, |ui| {
+         self.menubar(ui, false);
+      });
+   }
+
+   fn bottom_ui(&mut self, ui: &mut Ui) {
+      TopBottomPanel::new(TopBottomSide::Bottom, "bottom").show_inside(ui, |ui| {
+         ui.horizontal(|ui| {
+            if ui.button("SwitchFullscreenState").clicked() {
+               self.set_fullscreen(!self.temp_settings.is_fullscreen);
+            };
+
+            if ui.button("Play").clicked() {
+               self.mut_backend().start().unwrap();
+            }
+
+            if ui.button("Pause").clicked() {
+               self.mut_backend().stop().unwrap();
+            }
+         })
       });
    }
 }

@@ -130,7 +130,6 @@ impl GstreamerBackend {
             self.probe = Some(probe_res);
          }
       }
-
       // update frame
       if self.force_frame_update {
          self.force_frame_update = false;
@@ -139,11 +138,19 @@ impl GstreamerBackend {
                Ok(update)
             }
             Err(_) => {
-               let (_, start_state, _) = self.pipeline.state(Some(ClockTime::from_mseconds(2)));
+               let (_, start_state, _) = self.pipeline.state(Some(ClockTime::from_mseconds(2000))); // TODO Do a target state check over this, unreliable
                if !matches!(start_state, State::Playing) { self.start()?; }
-               let sample = self.appsink.pull_sample()?;
-               let update = Update::from_sample(sample)?;
-               if !matches!(start_state, State::Playing) { self.pipeline.set_state(start_state)?; }
+
+
+               // let sample = self.appsink.pull_sample()?;
+               // let update = Update::from_sample(sample)?;
+
+               let current_position = self.pipeline.query_position::<ClockTime>().unwrap_or(ClockTime::from_mseconds(0));
+               self.pipeline.seek_simple(SeekFlags::FLUSH | SeekFlags::KEY_UNIT, current_position)?; // TODO benchmark to see if theres a frame delay
+               let update = self.update_receiver.recv()?;
+
+               self.pipeline.set_state(start_state)?;
+
                Ok(update)
             }
          }

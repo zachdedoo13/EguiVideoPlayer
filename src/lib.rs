@@ -12,7 +12,6 @@ pub mod gstreamer_internals {
 
 pub mod gui {
     pub mod player;
-    pub mod custom_log;
 }
 
 pub mod wgpu {
