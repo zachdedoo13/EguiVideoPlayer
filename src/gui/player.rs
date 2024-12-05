@@ -1,19 +1,20 @@
 use crate::gstreamer_internals::player_backend::GstreamerBackend;
-use crate::gstreamer_internals::prober::{PollRes, Probe};
 use crate::wgpu::display_texture::WgpuEguiDisplayTexture;
 use crate::wgpu::pack::WgpuRenderPack;
 use anyhow::Result;
 use eframe::egui;
 use eframe::egui::panel::TopBottomSide;
-use eframe::egui::{CentralPanel, Frame, Rect, TopBottomPanel, Ui, ViewportCommand};
+use eframe::egui::{CentralPanel, Frame, ImageSource, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
+use eframe::egui::load::SizedTexture;
 use lazy_bastard::lazy_bastard;
+use crate::gstreamer_internals::prober::Probe;
 
 lazy_bastard!(
    pub struct SavedSettings {
       volume: f32 => 0.5,
+      scroll_speed_mult: f32 => 0.02,
    }
 );
-
 
 lazy_bastard!(
    pub struct TempSettings {
@@ -36,11 +37,16 @@ pub struct VidioPlayer {
    setup_settings: SetupSettings,
 }
 
-/// Constructors
+/////////////////////
+//// CONSTRUCTORS ///
+/////////////////////
 impl VidioPlayer {
    pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
+      let mut backend = GstreamerBackend::init(&*crate::URI_PATH_FRIEREN).unwrap();
+      backend.start().unwrap();
+
       Self {
-         backend: Some(GstreamerBackend::init(&*crate::URI_PATH_FRIEREN).unwrap()), // TODO debug only
+         backend: Some(backend),
          display_texture: WgpuEguiDisplayTexture::empty(),
          saved_settings,
          temp_settings: TempSettings::default(),
@@ -64,29 +70,25 @@ impl VidioPlayer {
    }
 }
 
-/// Methods
+
+///////////////////////
+//// Public METHODS ///
+///////////////////////
 impl VidioPlayer {
-   pub fn show<R: Into<WgpuRenderPack>>(&mut self, ui: &mut Ui, in_pack: R) -> Result<()> {
-      // update
-      match self.backend.is_some() {
-         true => {
-            let wgpu_render_pack: WgpuRenderPack = in_pack.into();
-            self.update_frame(&wgpu_render_pack)?;
-
-            // render
-            self.show_internal(ui);
-         }
-         false => {
-            ui.label("Open a vidio to do shit");
-
-            // display open vid image
-         }
+   pub fn show<R: Into<WgpuRenderPack>>(
+      &mut self,
+      ui: &mut Ui,
+      in_pack: R,
+   ) -> Result<()> {
+      if self.backend.is_some() {
+         let wgpu_render_pack: WgpuRenderPack = in_pack.into();
+         self.update_frame(&wgpu_render_pack)?;
+         self.show_internal(ui);
+      } else {
+         ui.label("Open a vidio to do shit");
       }
 
-      if ui.button("SwitchFullscreenState").clicked() {
-         self.set_fullscreen(!self.temp_settings.is_fullscreen);
-      }
-
+      ui.ctx().request_repaint();
       Ok(())
    }
 
@@ -97,9 +99,19 @@ impl VidioPlayer {
    }
 }
 
-/// Internal Display Methods
+
+//////////////////////////////////
+//// INTERNAL DISPLAY METHODS ////
+//////////////////////////////////
 impl VidioPlayer {
-   /// Panics if backend is none when called
+   fn get_backend(&mut self) -> &GstreamerBackend {
+      self.backend.as_ref().unwrap()
+   }
+
+   fn mut_backend(&mut self) -> &mut GstreamerBackend {
+      self.backend.as_mut().unwrap()
+   }
+
    fn update_frame(&mut self, wgpu_render_pack: &WgpuRenderPack) -> Result<()> {
       if let Ok(update) = self.backend.as_mut().unwrap().poll_update() {
          self.display_texture.create_or_update(wgpu_render_pack, update.frame)?;
@@ -136,31 +148,10 @@ impl VidioPlayer {
       }
    }
 
-   fn menubar(&mut self, ui: &mut Ui, vertical: bool) {
-      egui::menu::bar(ui, |ui| {
-         let mut cont = |ui: &mut Ui| {
-            match self.backend.as_mut().unwrap().probe.check() {
-               PollRes::NotInitialized => {}
-               PollRes::InProgress => {}
-               PollRes::Available(p) | PollRes::JustBecameAvailable(p) => {
-                  if let Ok(p) = p {
-                     self.menu_inner(ui, p); // todo broken
-                  }
-               }
-            }
-         };
+   /// ### Panics
+   fn menubar_inner(&mut self, ui: &mut Ui) {
+      let probe = self.get_backend().probe.as_ref().unwrap().as_ref().unwrap();
 
-         if vertical {
-            ui.vertical(|ui| {
-               cont(ui);
-            });
-         } else {
-            cont(ui);
-         }
-      });
-   }
-
-   fn menu_inner(&mut self, ui: &mut Ui, probe: &Probe) {
       ui.menu_button("file", |ui| {
          if ui.button("Open file").clicked() {
             todo!()
@@ -182,13 +173,9 @@ impl VidioPlayer {
 
       ui.menu_button("video", |ui| {
          ui.menu_button("video_track", |ui| {
-            // let current = self.raw.gstreamer_player.current_video_track().unwrap() as usize;
-            // for (track, index) in &self.raw.gstreamer_player.probe_result.video_streams {
-            //    let name = track.name.clone().unwrap_or("Unnamed_track".to_string());
-            //    if ui.button(format!("{name} |{index}| {}", if *index == current { "#" } else { "" })).clicked() {
-            //       self.raw.gstreamer_player.video_track(*index as u32).unwrap()
-            //    }
-            // }
+            for (vid_track, vid_index) in probe.video_streams.iter() {
+               ui.label(format!("Stream {vid_index} Named {:?}", vid_track.name));
+            }
          });
          if ui.button("screen shot").clicked() {
             todo!()
@@ -197,49 +184,27 @@ impl VidioPlayer {
 
       ui.menu_button("audio", |ui| {
          ui.menu_button("video_track", |ui| {
-            // let current = self.raw.gstreamer_player.current_audio_track().unwrap() as usize;
-            // for (track, index) in &self.raw.gstreamer_player.probe_result.audio_streams {
-            //    let name = track.name.clone().unwrap_or("Unnamed_track".to_string());
-            //    if ui.button(format!("{name} |{index}| {}", if *index == current { "#" } else { "" })).clicked() {
-            //       self.raw.gstreamer_player.audio_track(*index as u32).unwrap()
-            //    }
-            // }
          });
 
          ui.menu_button("Audio devices", |_ui| {
-            // todo!()
          });
 
          ui.menu_button("Mode", |_ui| {
-            // todo!()
          });
 
          ui.menu_button("Vol scroll speed", |ui| {
-            // ui.add(Slider::new(&mut self.saved.scroll_speed_mult, 1.0..=20.0));
-            todo!()
+            ui.add(Slider::new(&mut self.saved_settings.scroll_speed_mult, 1.0..=20.0));
          });
-
-         // let v = self.saved.volume * 100.0;
-         // ui.label(format!("Current volume {v:.2}%{}", if v == 100.0 { "" } else { "." }));
       });
 
       ui.menu_button("subtitles", |ui| {
          ui.menu_button("subtitle track", |ui| {
-            // let current = self.raw.gstreamer_player.current_sub_track().unwrap() as usize;
-            // for (sub, index) in &self.raw.gstreamer_player.probe_result.captions {
-            //    let name = sub.clone().unwrap_or("Unnamed_track".to_string());
-            //    if ui.button(format!("{name} |{index}| {}", if *index == current { "#" } else { "" })).clicked() {
-            //       self.raw.gstreamer_player.sub_track(*index as u32).unwrap()
-            //    }
-            // }
          });
 
          ui.menu_button("Audio devices", |_ui| {
-            // todo!()
          });
 
          ui.menu_button("Mode", |_ui| {
-            // todo!()
          });
       });
 
@@ -250,22 +215,101 @@ impl VidioPlayer {
       });
    }
 
-   fn player_ui(&mut self, ui: &mut Ui, rect: Rect) {
-      // menubar
+   /// TODO funky
+   fn menubar(&mut self, ui: &mut Ui, vertical: bool) {
+      egui::menu::bar(ui, |ui| {
+         let mut cont = |ui: &mut Ui| {
+            match &self.get_backend().probe {
+               None => { ui.label("Waiting for probe to complete"); },
+               Some(probe_res) => {
+                  match probe_res {
+                     Ok(_) => {
+                        self.menubar_inner(ui);
+                     }
+                     Err(err) => {
+                        ui.label(format!("Probe error => {err}"));
+                     }
+                  };
+               }
+            }
+         };
+
+         if vertical {
+            ui.vertical(|ui| {
+               cont(ui);
+            });
+         } else {
+            cont(ui);
+         }
+      });
+   }
+
+   fn player_interaction(&mut self, ui: &mut Ui, resp: Response) {
+      if resp.double_clicked() {
+         match self.get_backend().is_paused {
+            true => {
+               self.mut_backend().start().unwrap();
+            }
+            false => {
+               self.mut_backend().stop().unwrap();
+            }
+         }
+      }
+   }
+
+   fn player_ui(&mut self, ui: &mut Ui, major_rect: Rect) {
       TopBottomPanel::new(TopBottomSide::Top, "top").show_inside(ui, |ui| {
          self.menubar(ui, false);
       });
 
+      TopBottomPanel::new(TopBottomSide::Bottom, "bottom").show_inside(ui, |ui| {
+         ui.horizontal(|ui| {
+            if ui.button("SwitchFullscreenState").clicked() {
+               self.set_fullscreen(!self.temp_settings.is_fullscreen);
+            };
 
-      // Timeline and other buttons
-      TopBottomPanel::new(TopBottomSide::Bottom, "bottom").show_inside(ui, |ui| {});
+            if ui.button("Play").clicked() {
+               self.mut_backend().start().unwrap();
+            }
 
-      // Main video player
-      CentralPanel::default().frame(Frame::none()).show_inside(ui, |ui| {});
+            if ui.button("Pause").clicked() {
+               self.mut_backend().stop().unwrap();
+            }
+         })
+      });
+
+      CentralPanel::default().frame(Frame::none()).show_inside(ui, |ui| {
+         let resp_rect = ui.available_rect_before_wrap();
+         if let Some(inner) = &self.display_texture.inner {
+            let correct_size = inner.texture.size();
+            let aspect = correct_size.width as f32 / correct_size.height as f32;
+
+            let max_width = major_rect.width();
+            let max_height = major_rect.height();
+            let mut inner_width = max_width;
+            let mut inner_height = inner_width / aspect;
+
+            if inner_height > max_height {
+               inner_height = max_height;
+               inner_width = inner_height * aspect;
+            }
+
+            let mut inner_rect = major_rect;
+            inner_rect.set_width(inner_width);
+            inner_rect.set_height(inner_height);
+            inner_rect.set_center(major_rect.center());
+
+            ui.allocate_new_ui(UiBuilder::new().max_rect(inner_rect), |ui| {
+               ui.image(ImageSource::Texture(SizedTexture::new(inner.texture_id, ui.available_size())));
+            });
+         };
+
+         let resp = ui.allocate_rect(resp_rect, Sense {
+            click: true,
+            drag: true,
+            focusable: false,
+         });
+         self.player_interaction(ui, resp);
+      });
    }
 }
-
-
-
-
-

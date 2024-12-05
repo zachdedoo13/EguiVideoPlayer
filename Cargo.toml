@@ -7,6 +7,10 @@ edition = "2021"
 name = "test_app"
 path = "src/app.rs"
 
+[[bin]]
+name = "log_test"
+path = "src/gui/custom_log.rs"
+
 [dependencies]
 gstreamer = { version = "0.23.3", features = ["v1_24"] }
 gstreamer-app = { version = "0.23.3", features = ["v1_24"] }
@@ -25,6 +29,6 @@ crossbeam-channel = "0.5.13"
 
 log = "0.4.22"
 
-either = "1.13.0"
-
 url = "2.5.4"
+
+egui_logger = "0.6.1"

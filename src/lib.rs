@@ -12,6 +12,7 @@ pub mod gstreamer_internals {
 
 pub mod gui {
     pub mod player;
+    pub mod custom_log;
 }
 
 pub mod wgpu {
@@ -29,4 +30,4 @@ pub fn path_to_uri(path: &Path) -> anyhow::Result<String> {
 
 // test_uris
 pub const URI_ONLINE_CAR: LazyCell<String> = LazyCell::new(|| "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WhatCarCanYouGetForAGrand.mp4".to_string());
-pub const URI_PATH_FRIEREN: LazyCell<String> = LazyCell::new(|| path_to_uri(Path::new("E:/TorrentArchive/AnimeLibary/frieren/ep_1_placeholder.mkv")).unwrap());
+pub const URI_PATH_FRIEREN: LazyCell<String> = LazyCell::new(|| path_to_uri(Path::new("E:/TorrentArchive/AnimeLibary/frieren/[Judas] Sousou no Frieren - S01E01v2.mkv")).unwrap());
