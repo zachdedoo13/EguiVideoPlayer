@@ -1,17 +1,13 @@
-use std::sync::{Arc, RwLock};
 use crate::gstreamer_internals::player_backend::GstreamerBackend;
 use crate::wgpu::display_texture::WgpuEguiDisplayTexture;
 use crate::wgpu::pack::WgpuRenderPack;
 use anyhow::Result;
 use eframe::egui;
 use eframe::egui::panel::TopBottomSide;
-use eframe::egui::{CentralPanel, Frame, ImageSource, Key, PointerButton, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
+use eframe::egui::{CentralPanel, Frame, ImageSource, Key, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
 use eframe::egui::load::SizedTexture;
-use egui_logger::EguiLogger;
 use gstreamer::ClockTime;
 use lazy_bastard::lazy_bastard;
-use log::{debug, Level, Log, Record};
-use crate::gstreamer_internals::prober::Probe;
 
 lazy_bastard!(
    pub struct SavedSettings {
