@@ -6,11 +6,10 @@ use gstreamer_video::{VideoFrame, VideoInfo};
 pub struct Update {
    pub frame: VideoFrame<Readable>,
    pub timecode: ClockTime,
-   pub info: VideoInfo,
 }
 
 impl Update {
-   pub fn from_sample(sample: Sample) -> anyhow::Result<Self> {
+   pub fn from_sample(sample: Sample) -> anyhow::Result<(Self, VideoInfo)> {
       let buffer = sample.buffer_owned().context("No buffer")?;
       let caps = sample.caps().context("No caps")?;
       let vidio_info = VideoInfo::from_caps(&caps)?;
@@ -20,10 +19,9 @@ impl Update {
       let frame = VideoFrame::from_buffer_readable(buffer, &vidio_info)
           .ok().context("Failed to grab frame")?;
 
-      Ok(Self {
-         frame,
-         timecode,
-         info: vidio_info,
-      })
+      Ok((
+         Self { frame, timecode},
+         vidio_info,
+      ))
    }
 }

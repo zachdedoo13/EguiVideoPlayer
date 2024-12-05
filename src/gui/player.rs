@@ -42,8 +42,7 @@ pub struct VidioPlayer {
 /////////////////////
 impl VidioPlayer {
    pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
-      let mut backend = GstreamerBackend::init(&*crate::URI_PATH_FRIEREN).unwrap();
-      backend.force_update_now(true).unwrap();
+      let backend = GstreamerBackend::init(&*crate::URI_PATH_FRIEREN).unwrap();
 
       Self {
          backend: Some(backend),
@@ -104,6 +103,7 @@ impl VidioPlayer {
 //// INTERNAL DISPLAY METHODS ////
 //////////////////////////////////
 impl VidioPlayer {
+   #[inline(always)]
    fn get_backend(&mut self) -> &GstreamerBackend {
       self.backend.as_ref().unwrap()
    }
@@ -185,7 +185,7 @@ impl VidioPlayer {
       });
 
       ui.menu_button("audio", |ui| {
-         ui.menu_button("video_track", |ui| {
+         ui.menu_button("video_track", |_ui| {
          });
 
          ui.menu_button("Audio devices", |_ui| {
@@ -200,7 +200,7 @@ impl VidioPlayer {
       });
 
       ui.menu_button("subtitles", |ui| {
-         ui.menu_button("subtitle track", |ui| {
+         ui.menu_button("subtitle track", |_ui| {
          });
 
          ui.menu_button("Audio devices", |_ui| {
@@ -214,16 +214,26 @@ impl VidioPlayer {
          if ui.button("open settings").clicked() {
             todo!()
          }
+
+
+         if ui.button("Fullscreen").clicked() {
+            self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
+         }
+
+         if ui.button("Test").clicked() {
+            self.mut_backend().seek_keyframe(ClockTime::from_seconds_f64(120.0)).unwrap();
+            self.mut_backend().queue_forced_update();
+         }
+
+         if ui.button("Fullscreen").clicked() {
+            self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
+         }
+
+         if ui.button("Step_one_frame").clicked() {
+            self.mut_backend().step_frames_forward_exact(1).unwrap();
+            self.mut_backend().queue_forced_update();
+         }
       });
-
-      if ui.button("Fullscreen").clicked() {
-         self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
-      }
-
-      if ui.button("Test").clicked() {
-         self.mut_backend().seek_normal(ClockTime::from_seconds_f64(120.0)).unwrap();
-         self.mut_backend().queue_forced_update();
-      }
    }
 
    /// TODO funky
@@ -263,7 +273,7 @@ impl VidioPlayer {
       // keyboard input
       ui.ctx().input(|i| {
          if i.key_pressed(Key::Space) {
-            match self.get_backend().is_paused {
+            match self.get_backend().is_paused() {
                true => {
                   self.mut_backend().start().unwrap();
                }
@@ -354,6 +364,13 @@ impl VidioPlayer {
 
             if ui.button("Pause").clicked() {
                self.mut_backend().stop().unwrap();
+            }
+
+            let mut change = self.get_backend().timecode.seconds_f64();
+            let max = self.get_backend().get_duration().unwrap().seconds_f64();
+            if ui.add(Slider::new(&mut change, 0.0..=max)).changed() {
+               self.get_backend().seek_keyframe(ClockTime::from_seconds_f64(change)).unwrap();
+               self.mut_backend().queue_forced_update();
             }
          })
       });

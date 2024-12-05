@@ -1,6 +1,5 @@
 use anyhow::Result;
 use eframe::egui::TextureId;
-use eframe::egui_wgpu::RenderState;
 use eframe::wgpu::{AddressMode, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, FilterMode, ImageCopyBuffer, ImageCopyTexture, ImageDataLayout, Origin3d, SamplerDescriptor, Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension};
 use gstreamer_video::video_frame::Readable;
 use gstreamer_video::{VideoFormat, VideoFrame, VideoFrameExt};

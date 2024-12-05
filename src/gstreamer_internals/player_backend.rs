@@ -1,22 +1,26 @@
 use crate::gstreamer_internals::prober::{Probe};
 use crate::gstreamer_internals::update::Update;
-use anyhow::Result;
+use anyhow::{Result};
 use crossbeam_channel::{Receiver};
 use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstObjectExt, ObjectExt};
-use gstreamer::{Caps, ClockTime, ElementFactory, FlowSuccess, Pipeline, SeekFlags, State};
+use gstreamer::{Caps, ClockTime, ElementFactory, FlowSuccess, Fraction, Pipeline, SeekFlags, State};
 use gstreamer_app::AppSink;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::thread::JoinHandle;
+use gstreamer_video::VideoInfo;
 
 pub struct GstreamerBackend {
    pub uri: String,
    pub pipeline: Pipeline,
    pub appsink: AppSink,
-   pub update_receiver: Receiver<Update>,
+   pub update_receiver: Receiver<(Update, VideoInfo)>,
    pub probe: Option<Result<Probe>>,
    probe_future: Option<JoinHandle<Result<Probe>>>,
    force_frame_update: bool,
-   pub is_paused: bool,
+
+   pub latest_info: Option<VideoInfo>,
+   pub timecode: ClockTime,
+   pub target_state: State,
 }
 
 impl Drop for GstreamerBackend {
@@ -31,16 +35,17 @@ impl GstreamerBackend {
       gstreamer::init()?;
 
       let (pipeline, appsink) = Self::create_playbin_pipeline(&uri)?;
+      pipeline.set_state(State::Paused)?;
 
-      let (update_sender, update_receiver) = crossbeam_channel::bounded::<Update>(2);
+      let (update_sender, update_receiver) = crossbeam_channel::bounded::<(Update, VideoInfo)>(2);
 
       appsink.set_callbacks(
          gstreamer_app::AppSinkCallbacks::builder()
              .new_sample(move |sink| {
                 match sink.pull_sample() {
                    Ok(sample) => {
-                      let update = Update::from_sample(sample).unwrap();
-                      if update_sender.send_timeout(update, Duration::from_millis(500)).is_err() {
+                      let up_info = Update::from_sample(sample).unwrap();
+                      if update_sender.send_timeout(up_info, Duration::from_millis(500)).is_err() {
                          println!("Frame sender timed out");
                       }
                    }
@@ -85,7 +90,9 @@ impl GstreamerBackend {
          probe: None,
          probe_future,
          force_frame_update: false,
-         is_paused: true,
+         latest_info: None,
+         timecode: ClockTime::ZERO,
+         target_state: State::Paused,
       })
    }
 
@@ -130,34 +137,84 @@ impl GstreamerBackend {
             self.probe = Some(probe_res);
          }
       }
+
       // update frame
       if self.force_frame_update {
          self.force_frame_update = false;
-         match self.update_receiver.try_recv() {
+         match self.try_get_update() {
             Ok(update) => {
                Ok(update)
             }
             Err(_) => {
-               let (_, start_state, _) = self.pipeline.state(Some(ClockTime::from_mseconds(2000))); // TODO Do a target state check over this, unreliable
-               if !matches!(start_state, State::Playing) { self.start()?; }
-
-
-               // let sample = self.appsink.pull_sample()?;
-               // let update = Update::from_sample(sample)?;
-
-               let current_position = self.pipeline.query_position::<ClockTime>().unwrap_or(ClockTime::from_mseconds(0));
-               self.pipeline.seek_simple(SeekFlags::FLUSH | SeekFlags::KEY_UNIT, current_position)?; // TODO benchmark to see if theres a frame delay
-               let update = self.update_receiver.recv()?;
-
-               self.pipeline.set_state(start_state)?;
-
-               Ok(update)
+               Ok(self.await_forced_update()?)
             }
          }
       }
       else {
-         Ok(self.update_receiver.try_recv()?)
+         Ok(self.try_get_update()?)
       }
+   }
+
+
+   fn await_forced_update(&mut self) -> Result<Update> {
+      // let st = Instant::now();
+
+      // let poll_state = Instant::now();
+      let start_state = self.target_state;
+      // if !matches!(start_state, State::Playing) { self.start()?; }
+      self.start()?;
+      // println!("\n\nForced frame time state_pull {:?}", poll_state.elapsed());
+
+      // let poll_st = Instant::now();
+      // let current_position = self.pipeline.query_position::<ClockTime>().unwrap_or(ClockTime::from_mseconds(0));
+      // println!("Forced frame time poll {:?}", poll_st.elapsed());
+
+      // let seek_st = Instant::now();
+      // flush is required to make it not laggy but adds 20ms
+      // self.pipeline.seek_simple(
+      //    SeekFlags::FLUSH |
+      //        SeekFlags::KEY_UNIT |
+      //        SeekFlags::SNAP_AFTER,
+      //    current_position)?; // TODO benchmark to see if theres a frame delay
+
+      // self.step_frames_forward(1)?;
+      // println!("Forced frame time seek {:?}", seek_st.elapsed());
+
+
+      let update_st = Instant::now();
+      let update = self.await_update()?;
+      println!("Forced frame time rev {:?}", update_st.elapsed());
+
+      // let state_st = Instant::now();
+
+      match start_state {
+         State::VoidPending => {}
+         State::Null => {}
+         State::Ready => {}
+         State::Paused => {self.stop()?;}
+         State::Playing => {self.start()?;}
+      }
+      // self.pipeline.set_state(start_state)?;
+      // println!("Forced frame time state {:?}", state_st.elapsed());
+
+      // println!("Forced frame time {:?}", st.elapsed());
+
+
+      Ok(update)
+   }
+
+   fn try_get_update(&mut self) -> Result<Update> {
+      Ok(self.handle_update(self.update_receiver.try_recv()?))
+   }
+
+   fn await_update(&mut self) -> Result<Update> {
+      Ok(self.handle_update(self.update_receiver.recv()?))
+   }
+
+   fn handle_update(&mut self, inny: (Update, VideoInfo)) -> Update {
+      self.latest_info = Some(inny.1);
+      self.timecode = inny.0.timecode;
+      inny.0
    }
 }
 
@@ -166,26 +223,37 @@ impl GstreamerBackend {
    // state
    pub fn start(&mut self) -> Result<()> {
       self.pipeline.set_state(State::Playing)?;
-      self.is_paused = false;
+      self.target_state = State::Playing;
       Ok(())
    }
 
    pub fn stop(&mut self) -> Result<()> {
       self.pipeline.set_state(State::Paused)?;
-      self.is_paused = true;
+      self.target_state = State::Paused;
       Ok(())
    }
 
    pub fn exit(&mut self) -> Result<()> {
       self.pipeline.set_state(State::Null)?;
-      self.is_paused = true;
+      self.target_state = State::Null;
       Ok(())
+   }
+
+   pub fn is_paused(&self) -> bool {
+      let _st = self.target_state;
+      matches!(State::Paused, _st)
+   }
+
+   pub fn is_playing(&self) -> bool {
+      let _st = self.target_state;
+      matches!(State::Playing, _st)
    }
 
 
    // seek
    pub fn seek_trickmode(&self, seek_to: ClockTime) -> Result<()> {
       let seek_flags =
+         SeekFlags::FLUSH |
           SeekFlags::TRICKMODE |
           SeekFlags::TRICKMODE_KEY_UNITS |
           SeekFlags::TRICKMODE_FORWARD_PREDICTED |
@@ -201,8 +269,14 @@ impl GstreamerBackend {
       Ok(())
    }
 
-   pub fn seek_normal(&self, seek_to: ClockTime) -> Result<()> {
+   pub fn seek_keyframe(&self, seek_to: ClockTime) -> Result<()> {
       let seek_flags = SeekFlags::FLUSH | SeekFlags::KEY_UNIT;
+      self.pipeline.seek_simple(seek_flags, seek_to)?;
+      Ok(())
+   }
+
+   pub fn seek_just_flush(&self, seek_to: ClockTime) -> Result<()> {
+      let seek_flags = SeekFlags::FLUSH;
       self.pipeline.seek_simple(seek_flags, seek_to)?;
       Ok(())
    }
@@ -215,27 +289,39 @@ impl GstreamerBackend {
 
 
    // step
-   pub fn step_frames(&self, _frames: i32) {
-      todo!()
+   pub fn step_frames_forward_exact(&mut self, frames: u64) -> Result<()> {
+      if let Some(info) = &self.latest_info {
+         let seek_flags = SeekFlags::FLUSH;
+         let current_position = self.pipeline.query_position::<ClockTime>().unwrap_or(ClockTime::from_mseconds(0));
+         let fps = fraction_to_f64(info.fps());
+         let frame_duration = ClockTime::from_seconds_f64((1.0 / fps) - 0.01); // Assuming 30 FPS, adjust as needed
+         let seek_to = current_position + frame_duration * frames;
+         self.pipeline.seek_simple(seek_flags, seek_to)?;
+
+      } else {
+         self.queue_forced_update();
+      }
+
+      Ok(())
    }
 
+   pub fn get_duration(&self) -> Result<ClockTime> {
+      let duration = self.pipeline.query_duration::<ClockTime>().unwrap_or(ClockTime::ZERO);
+      Ok(duration)
+   }
 
    // poll
    pub fn queue_forced_update(&mut self) {
       self.force_frame_update = true;
-   }
-
-   pub fn force_update_now(&mut self, end_paused: bool) -> Result<Update> {
-      self.start()?;
-      let update = self.update_receiver.recv()?;
-      if end_paused {
-         self.stop()?;
-      }
-      Ok(update)
    }
 }
 
 /// Tracks
 impl GstreamerBackend {
 
+}
+
+
+fn fraction_to_f64(fraction: Fraction) -> f64 {
+   fraction.numer() as f64 / fraction.denom() as f64
 }
