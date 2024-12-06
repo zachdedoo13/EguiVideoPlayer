@@ -6,7 +6,7 @@ use gstreamer_pbutils::Discoverer;
 use std::thread::JoinHandle;
 
 // helper functions
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VideoStream {
    pub name: Option<String>,
    pub fps: Option<f64>,
@@ -17,7 +17,7 @@ pub struct VideoStream {
    pub index: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AudioStream {
    pub name: Option<String>,
    pub codec: Option<String>,
@@ -25,7 +25,7 @@ pub struct AudioStream {
    pub index: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Probe {
    pub uri: String,
    pub captions: Vec<(Option<String>, usize)>,

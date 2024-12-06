@@ -1,4 +1,3 @@
-use crate::gstreamer_internals::player_backend::GstreamerBackend;
 use crate::wgpu::display_texture::WgpuEguiDisplayTexture;
 use crate::wgpu::pack::WgpuRenderPack;
 use anyhow::Result;
@@ -6,7 +5,7 @@ use eframe::egui;
 use eframe::egui::panel::TopBottomSide;
 use eframe::egui::{CentralPanel, Frame, ImageSource, Key, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
 use eframe::egui::load::SizedTexture;
-use gstreamer::{ClockTime, SeekFlags};
+use gstreamer::{ClockTime};
 use lazy_bastard::lazy_bastard;
 use crate::gstreamer_internals::backend_framework::GstreamerBackendFramework;
 
@@ -43,7 +42,7 @@ pub struct VidioPlayer<B: GstreamerBackendFramework> {
 /////////////////////
 impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
    pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
-      let backend = Backend::init(&*crate::URI_PATH_FRIEREN).unwrap();
+      let backend = Backend::init(&*crate::URI_PATH_HELLS_PARADISE).unwrap();
 
       Self {
          backend: Some(backend),
@@ -153,8 +152,6 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
 
    /// ### Panics
    fn menubar_inner(&mut self, ui: &mut Ui) {
-      let probe = self.get_backend().get_probe().unwrap();
-
       ui.menu_button("file", |ui| {
          if ui.button("Open file").clicked() {
             todo!()
@@ -175,18 +172,50 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
       });
 
       ui.menu_button("video", |ui| {
-         ui.menu_button("video_track", |ui| {
-            for (vid_track, vid_index) in probe.video_streams.iter() {
-               ui.label(format!("Stream {vid_index} Named {:?}", vid_track.name));
+         ui.menu_button("video track", |ui| {
+            let probe = self.get_backend().get_probe().unwrap().clone();
+
+            let current = self.get_backend().get_video_track().unwrap();
+            for (i, (name_op, _id)) in probe.video_streams.iter().enumerate() {
+
+               let title = match &name_op.name {
+                  None => "No name".to_string(),
+                  Some(name) => name.clone(),
+               };
+
+               let formated_title = match i as u32 == current {
+                  true => format!("{i} | {title} #"),
+                  false => format!("{i} | {title}"),
+               };
+
+               if ui.button(formated_title).clicked() {
+                  self.mut_backend().set_video_track(i as u32).unwrap()
+               }
             }
          });
-         if ui.button("screen shot").clicked() {
-            todo!()
-         }
       });
 
       ui.menu_button("audio", |ui| {
-         ui.menu_button("video_track", |_ui| {
+         ui.menu_button("audio track", |ui| {
+            let probe = self.get_backend().get_probe().unwrap().clone();
+
+            let current = self.get_backend().get_audio_track().unwrap();
+            for (i, (name_op, _id)) in probe.audio_streams.iter().enumerate() {
+
+               let title = match &name_op.name {
+                  None => "No name".to_string(),
+                  Some(name) => name.clone(),
+               };
+
+               let formated_title = match i as u32 == current {
+                  true => format!("{i} | {title} #"),
+                  false => format!("{i} | {title}"),
+               };
+
+               if ui.button(formated_title).clicked() {
+                  self.mut_backend().set_audio_track(i as u32).unwrap()
+               }
+            }
          });
 
          ui.menu_button("Audio devices", |_ui| {
@@ -201,13 +230,28 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
       });
 
       ui.menu_button("subtitles", |ui| {
-         ui.menu_button("subtitle track", |_ui| {
-         });
 
-         ui.menu_button("Audio devices", |_ui| {
-         });
+         ui.menu_button("subtitle track", |ui| {
+            let probe = self.get_backend().get_probe().unwrap().clone();
 
-         ui.menu_button("Mode", |_ui| {
+            let current = self.get_backend().get_sub_track().unwrap();
+            for (i, (name_op, _id)) in probe.captions.iter().enumerate() {
+
+
+               let title = match &name_op {
+                  None => "No name".to_string(),
+                  Some(name) => name.clone(),
+               };
+
+               let formated_title = match i as u32 == current {
+                  true => format!("{i} | {title} #"),
+                  false => format!("{i} | {title}"),
+               };
+
+               if ui.button(formated_title).clicked() {
+                  self.mut_backend().set_sub_track(i as u32).unwrap()
+               }
+            }
          });
       });
 
@@ -227,6 +271,24 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
 
          if ui.button("Step_one_frame").clicked() {
             self.mut_backend().seek_frames(1).unwrap();
+            // self.mut_backend().queue_frame_update();
+         }
+
+         if ui.button("Step_min_one_frame").clicked() {
+            self.mut_backend().seek_frames(-1).unwrap();
+            // self.mut_backend().queue_frame_update();
+         }
+
+
+         if ui.button("Step_100_frame").clicked() {
+            self.mut_backend().seek_frames(100).unwrap();
+            // self.mut_backend().queue_frame_update();
+         }
+
+
+
+         if ui.button("Step_back_100_frame").clicked() {
+            self.mut_backend().seek_frames(-100).unwrap();
             // self.mut_backend().queue_frame_update();
          }
 
@@ -250,7 +312,7 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
          let mut cont = |ui: &mut Ui| {
             match self.get_backend().get_probe() {
                Err(err) => { ui.label(format!("{err}")); },
-               Ok(probe) => {
+               Ok(_) => {
                   // match probe_res {
                   //    Ok(_) => {
                   //       self.menubar_inner(ui);
@@ -377,11 +439,22 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
             }
 
             let mut change = self.get_backend().timecode().seconds_f64();
-            let max = self.get_backend().get_duration().unwrap().seconds_f64();
-            if ui.add(Slider::new(&mut change, 0.0..=max)).changed() {
-               self.mut_backend().seek_time(
-                  SeekFlags::FLUSH | SeekFlags::KEY_UNIT,
+            let max = self.get_backend().get_duration().unwrap().seconds_f64() - self.get_backend().get_frametime();
+            if ui.add(Slider::new(&mut change, 0.0..=max).prefix("Keyframe ")).changed() {
+               self.mut_backend().seek_timeline(
                   ClockTime::from_seconds_f64(change),
+                  false
+               ).unwrap();
+
+               self.mut_backend().queue_frame_update();
+            }
+
+            let mut change = self.get_backend().timecode().seconds_f64();
+            let max = self.get_backend().get_duration().unwrap().seconds_f64() - self.get_backend().get_frametime();
+            if ui.add(Slider::new(&mut change, 0.0..=max).prefix("Exact ")).changed() {
+               self.mut_backend().seek_timeline(
+                  ClockTime::from_seconds_f64(change),
+                  true
                ).unwrap();
 
                self.mut_backend().queue_frame_update();
