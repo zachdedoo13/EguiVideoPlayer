@@ -4,10 +4,14 @@ use crate::gstreamer_internals::prober::Probe;
 use crate::gstreamer_internals::update::FrameUpdate;
 use anyhow::{bail, Result};
 use crossbeam_channel::Receiver;
+use gstreamer::ffi::GstPipeline;
+use gstreamer::glib::gobject_ffi::{g_object_get, g_object_set, GObject};
+use gstreamer::glib::translate::ToGlibPtr;
 use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstObjectExt, ObjectExt};
 use gstreamer::{Caps, ClockTime, Element, ElementFactory, FlowSuccess, Pipeline, SeekFlags, SeekType, State};
 use gstreamer_app::AppSink;
-use gstreamer_video::VideoInfo;
+use gstreamer_video::{VideoInfo};
+use std::ffi::CString;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -398,8 +402,38 @@ impl GstreamerBackendFramework for BackendV2 {
    // Subtitle Methods //
    //////////////////////
 
-   fn toggle_subtitles(&mut self, _set_to: bool) -> Result<()> {
-      todo!()
+   fn toggle_subtitles(&mut self, set_to: bool) -> Result<()> {
+      // self.pipeline.set_property("current-text", -1);
+      // self.pipeline.set_property("suburi", "data:text/plain;base64,");
+
+      // self.pipeline.set_property("flags", 0u32);
+
+      let pipeline = &self.pipeline;
+      let gst_pipeline: *mut GstPipeline = pipeline.to_glib_none().0;
+      let gobject_ptr: *mut GObject = gst_pipeline as *mut GObject;
+
+      let property_name = CString::new("flags")?;
+      let mut flags: u32 = 0;
+
+      const GST_PLAY_FLAG_TEXT: u32 = 1 << 2;
+
+      unsafe {
+         g_object_get(gobject_ptr, property_name.as_ptr(), &mut flags as *mut u32 as *mut _, std::ptr::null::<i32>());
+         println!("Current flags: {:b}", flags);
+
+         if set_to {
+            flags |= !GST_PLAY_FLAG_TEXT;
+            todo!()
+         } else {
+            flags &= !GST_PLAY_FLAG_TEXT;
+         }
+
+         // flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO | GST_PLAY_FLAG_TEXT;
+
+         g_object_set(gobject_ptr, property_name.as_ptr(), flags, std::ptr::null::<i32>());
+      }
+
+      Ok(())
    }
 }
 

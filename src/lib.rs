@@ -42,3 +42,9 @@ pub const URI_PATH_FRIEREN: LazyCell<String> = LazyCell::new(||
 
 pub const URI_PATH_HELLS_PARADISE: LazyCell<String> = LazyCell::new(||
     path_to_uri(Path::new("E:/TorrentArchive/AnimeLibary/Jigokuraku S01 (BD 1080p AV1) [Dual-Audio] [MiniVodes]/Jigokuraku - S01E04 (BD 1080p AV1) [MiniVodes].mkv")).unwrap());
+
+
+pub const URI_PATH_BROKO_BAD: LazyCell<String> = LazyCell::new(||
+    path_to_uri(Path::new("E:/TorrentArchive/ShowLibary/Breaking.Bad.S01-S05.1080p.NF.WEB-DL.AV1.EAC3/Breaking Bad Season 2/Breaking.Bad.S02E01.Seven.Thirty-Seven.1080p.NF.WEB-DL.AV1.EAC3.mkv")).unwrap());
+
+

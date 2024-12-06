@@ -42,7 +42,7 @@ pub struct VidioPlayer<B: GstreamerBackendFramework> {
 /////////////////////
 impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
    pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
-      let backend = Backend::init(&*crate::URI_PATH_HELLS_PARADISE).unwrap();
+      let backend = Backend::init(&*crate::URI_PATH_BROKO_BAD).unwrap();
 
       Self {
          backend: Some(backend),
@@ -253,6 +253,14 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
                }
             }
          });
+
+         if ui.button("disable").clicked() {
+            self.mut_backend().toggle_subtitles(false).unwrap();
+         }
+
+         if ui.button("enable").clicked() {
+            self.mut_backend().toggle_subtitles(false).unwrap();
+         }
       });
 
       ui.menu_button("tools", |ui| {
@@ -368,12 +376,10 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
                //    self.saved.volume = set as f32;
                //    self.raw.gstreamer_player.set_volume(set).unwrap();
                // }
-               todo!()
+               // todo!()
             }
          });
       }
-
-
 
       resp.context_menu(|ui| {
          ui.set_max_width(75.0);
