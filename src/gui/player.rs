@@ -6,8 +6,9 @@ use eframe::egui;
 use eframe::egui::panel::TopBottomSide;
 use eframe::egui::{CentralPanel, Frame, ImageSource, Key, Rect, Response, Sense, Slider, TopBottomPanel, Ui, UiBuilder, ViewportCommand};
 use eframe::egui::load::SizedTexture;
-use gstreamer::ClockTime;
+use gstreamer::{ClockTime, SeekFlags};
 use lazy_bastard::lazy_bastard;
+use crate::gstreamer_internals::backend_framework::GstreamerBackendFramework;
 
 lazy_bastard!(
    pub struct SavedSettings {
@@ -29,8 +30,8 @@ lazy_bastard!(
    }
 );
 
-pub struct VidioPlayer {
-   pub backend: Option<GstreamerBackend>,
+pub struct VidioPlayer<B: GstreamerBackendFramework> {
+   pub backend: Option<B>,
    display_texture: WgpuEguiDisplayTexture,
    saved_settings: SavedSettings,
    temp_settings: TempSettings,
@@ -40,9 +41,9 @@ pub struct VidioPlayer {
 /////////////////////
 //// CONSTRUCTORS ///
 /////////////////////
-impl VidioPlayer {
+impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
    pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
-      let backend = GstreamerBackend::init(&*crate::URI_PATH_FRIEREN).unwrap();
+      let backend = Backend::init(&*crate::URI_PATH_FRIEREN).unwrap();
 
       Self {
          backend: Some(backend),
@@ -60,7 +61,7 @@ impl VidioPlayer {
    }
 
    pub fn open_uri(&mut self, uri: &str) -> Result<()> {
-      self.backend = Some(GstreamerBackend::init(uri)?);
+      self.backend = Some(Backend::init(uri)?);
       Ok(())
    }
 
@@ -73,7 +74,7 @@ impl VidioPlayer {
 ///////////////////////
 //// Public METHODS ///
 ///////////////////////
-impl VidioPlayer {
+impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
    pub fn show<R: Into<WgpuRenderPack>>(
       &mut self,
       ui: &mut Ui,
@@ -102,18 +103,18 @@ impl VidioPlayer {
 //////////////////////////////////
 //// INTERNAL DISPLAY METHODS ////
 //////////////////////////////////
-impl VidioPlayer {
+impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
    #[inline(always)]
-   fn get_backend(&mut self) -> &GstreamerBackend {
+   fn get_backend(&mut self) -> &Backend {
       self.backend.as_ref().unwrap()
    }
 
-   fn mut_backend(&mut self) -> &mut GstreamerBackend {
+   fn mut_backend(&mut self) -> &mut Backend {
       self.backend.as_mut().unwrap()
    }
 
    fn update_frame(&mut self, wgpu_render_pack: &WgpuRenderPack) -> Result<()> {
-      if let Ok(update) = self.backend.as_mut().unwrap().poll_update() {
+      if let Ok(update) = self.backend.as_mut().unwrap().update() {
          self.display_texture.create_or_update(wgpu_render_pack, update.frame)?;
       }
       Ok(())
@@ -152,7 +153,7 @@ impl VidioPlayer {
 
    /// ### Panics
    fn menubar_inner(&mut self, ui: &mut Ui) {
-      let probe = self.get_backend().probe.as_ref().unwrap().as_ref().unwrap();
+      let probe = self.get_backend().get_probe().unwrap();
 
       ui.menu_button("file", |ui| {
          if ui.button("Open file").clicked() {
@@ -220,18 +221,25 @@ impl VidioPlayer {
             self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
          }
 
-         if ui.button("Test").clicked() {
-            self.mut_backend().seek_keyframe(ClockTime::from_seconds_f64(120.0)).unwrap();
-            self.mut_backend().queue_forced_update();
-         }
-
          if ui.button("Fullscreen").clicked() {
             self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
          }
 
          if ui.button("Step_one_frame").clicked() {
-            self.mut_backend().step_frames_forward_exact(1).unwrap();
-            self.mut_backend().queue_forced_update();
+            self.mut_backend().seek_frames(1).unwrap();
+            // self.mut_backend().queue_frame_update();
+         }
+
+         if ui.button("Reverse").clicked() {
+            // self.mut_backend().seek_frames(1).unwrap();
+            // self.mut_backend().queue_frame_update();
+
+            self.mut_backend().change_playback_speed(10.0).unwrap();
+         }
+
+         let mut pbs = self.get_backend().current_playback_speed();
+         if ui.add(Slider::new(&mut pbs, 0.1..=5.0)).drag_stopped() {
+            self.mut_backend().change_playback_speed(pbs).unwrap();
          }
       });
    }
@@ -240,17 +248,19 @@ impl VidioPlayer {
    fn menubar(&mut self, ui: &mut Ui, vertical: bool) {
       egui::menu::bar(ui, |ui| {
          let mut cont = |ui: &mut Ui| {
-            match &self.get_backend().probe {
-               None => { ui.label("Waiting for probe to complete"); },
-               Some(probe_res) => {
-                  match probe_res {
-                     Ok(_) => {
-                        self.menubar_inner(ui);
-                     }
-                     Err(err) => {
-                        ui.label(format!("Probe error => {err}"));
-                     }
-                  };
+            match self.get_backend().get_probe() {
+               Err(err) => { ui.label(format!("{err}")); },
+               Ok(probe) => {
+                  // match probe_res {
+                  //    Ok(_) => {
+                  //       self.menubar_inner(ui);
+                  //    }
+                  //    Err(err) => {
+                  //       ui.label(format!("Probe error => {err}"));
+                  //    }
+                  // };
+
+                  self.menubar_inner(ui);
                }
             }
          };
@@ -366,11 +376,15 @@ impl VidioPlayer {
                self.mut_backend().stop().unwrap();
             }
 
-            let mut change = self.get_backend().timecode.seconds_f64();
+            let mut change = self.get_backend().timecode().seconds_f64();
             let max = self.get_backend().get_duration().unwrap().seconds_f64();
             if ui.add(Slider::new(&mut change, 0.0..=max)).changed() {
-               self.get_backend().seek_keyframe(ClockTime::from_seconds_f64(change)).unwrap();
-               self.mut_backend().queue_forced_update();
+               self.mut_backend().seek_time(
+                  SeekFlags::FLUSH | SeekFlags::KEY_UNIT,
+                  ClockTime::from_seconds_f64(change),
+               ).unwrap();
+
+               self.mut_backend().queue_frame_update();
             }
          })
       });

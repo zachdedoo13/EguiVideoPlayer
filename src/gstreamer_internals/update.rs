@@ -3,12 +3,12 @@ use gstreamer::{ClockTime, Sample};
 use gstreamer_video::video_frame::Readable;
 use gstreamer_video::{VideoFrame, VideoInfo};
 
-pub struct Update {
+pub struct FrameUpdate {
    pub frame: VideoFrame<Readable>,
    pub timecode: ClockTime,
 }
 
-impl Update {
+impl FrameUpdate {
    pub fn from_sample(sample: Sample) -> anyhow::Result<(Self, VideoInfo)> {
       let buffer = sample.buffer_owned().context("No buffer")?;
       let caps = sample.caps().context("No caps")?;

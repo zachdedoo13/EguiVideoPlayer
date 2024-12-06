@@ -8,6 +8,8 @@ pub mod gstreamer_internals {
     pub mod player_backend;
     pub mod update;
     pub mod prober;
+    pub mod backend_framework;
+    pub mod backend_v2;
 }
 
 pub mod gui {

@@ -1,5 +1,5 @@
 use crate::gstreamer_internals::prober::{Probe};
-use crate::gstreamer_internals::update::Update;
+use crate::gstreamer_internals::update::FrameUpdate;
 use anyhow::{Result};
 use crossbeam_channel::{Receiver};
 use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstObjectExt, ObjectExt};
@@ -13,7 +13,7 @@ pub struct GstreamerBackend {
    pub uri: String,
    pub pipeline: Pipeline,
    pub appsink: AppSink,
-   pub update_receiver: Receiver<(Update, VideoInfo)>,
+   pub update_receiver: Receiver<(FrameUpdate, VideoInfo)>,
    pub probe: Option<Result<Probe>>,
    probe_future: Option<JoinHandle<Result<Probe>>>,
    force_frame_update: bool,
@@ -37,14 +37,14 @@ impl GstreamerBackend {
       let (pipeline, appsink) = Self::create_playbin_pipeline(&uri)?;
       pipeline.set_state(State::Paused)?;
 
-      let (update_sender, update_receiver) = crossbeam_channel::bounded::<(Update, VideoInfo)>(2);
+      let (update_sender, update_receiver) = crossbeam_channel::bounded::<(FrameUpdate, VideoInfo)>(2);
 
       appsink.set_callbacks(
          gstreamer_app::AppSinkCallbacks::builder()
              .new_sample(move |sink| {
                 match sink.pull_sample() {
                    Ok(sample) => {
-                      let up_info = Update::from_sample(sample).unwrap();
+                      let up_info = FrameUpdate::from_sample(sample).unwrap();
                       if update_sender.send_timeout(up_info, Duration::from_millis(500)).is_err() {
                          println!("Frame sender timed out");
                       }
@@ -124,7 +124,7 @@ impl GstreamerBackend {
       Ok((pipeline, appsink))
    }
 
-   pub fn poll_update(&mut self) -> Result<Update> {
+   pub fn poll_update(&mut self) -> Result<FrameUpdate> {
       // update Probe
       if self.probe_future.is_some() {
          let mut check = false;
@@ -156,7 +156,7 @@ impl GstreamerBackend {
    }
 
 
-   fn await_forced_update(&mut self) -> Result<Update> {
+   fn await_forced_update(&mut self) -> Result<FrameUpdate> {
       // let st = Instant::now();
 
       // let poll_state = Instant::now();
@@ -203,15 +203,15 @@ impl GstreamerBackend {
       Ok(update)
    }
 
-   fn try_get_update(&mut self) -> Result<Update> {
+   fn try_get_update(&mut self) -> Result<FrameUpdate> {
       Ok(self.handle_update(self.update_receiver.try_recv()?))
    }
 
-   fn await_update(&mut self) -> Result<Update> {
+   fn await_update(&mut self) -> Result<FrameUpdate> {
       Ok(self.handle_update(self.update_receiver.recv()?))
    }
 
-   fn handle_update(&mut self, inny: (Update, VideoInfo)) -> Update {
+   fn handle_update(&mut self, inny: (FrameUpdate, VideoInfo)) -> FrameUpdate {
       self.latest_info = Some(inny.1);
       self.timecode = inny.0.timecode;
       inny.0

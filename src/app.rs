@@ -1,5 +1,6 @@
 use eframe::{App, Renderer};
 use eframe::egui::{CentralPanel, Context, Frame};
+use vid_v2::gstreamer_internals::backend_v2::BackendV2;
 use vid_v2::gui::player::{SavedSettings, SetupSettings, VidioPlayer};
 
 fn main() {
@@ -16,7 +17,7 @@ fn main() {
 }
 
 pub struct TestApp {
-   player: VidioPlayer,
+   player: VidioPlayer<BackendV2>,
 }
 impl App for TestApp {
    fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
