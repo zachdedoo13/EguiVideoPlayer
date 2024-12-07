@@ -1,3 +1,4 @@
+use std::ops::RangeInclusive;
 use anyhow::Result;
 use gstreamer::{ClockTime, SeekFlags, State};
 use gstreamer_video::VideoInfo;
@@ -73,10 +74,37 @@ pub trait GstreamerBackendFramework: Sized {
    fn get_video_track(&self) -> Result<u32>;
    fn set_video_track(&mut self, track: u32) -> Result<()>;
 
+   fn set_audio_device(&mut self, device: &str) -> Result<()>;
+   fn list_audio_devices(&self) -> Result<Vec<(String, String)>>;
+   fn get_current_audio_device(&self) -> Option<String>;
+
+   fn get_current_volume(&self) -> f64;
+   fn get_volume_range(&self) -> RangeInclusive<f64>;
+   fn set_volume(&mut self, to: f64) -> Result<()>;
 
    //////////////////////
    // Subtitle Methods //
    //////////////////////
 
-   fn toggle_subtitles(&mut self, set_to: bool) -> Result<()>;
+   fn toggle_playflag(&mut self, set_to: bool, flag: u32) -> Result<()>;
+
+   fn get_playflag_state(&self, flag: u32) -> Result<bool>;
+
+}
+
+pub struct PlayFlags;
+impl PlayFlags {
+   pub const VIDEO: u32 = 1 << 0;
+   pub const AUDIO: u32 = 1 << 1;
+   pub const SUBTITLES: u32 = 1 << 2;
+   pub const VIS: u32 = 1 << 3;
+   pub const SOFT_VOLUME: u32 = 1 << 4;
+   pub const NATIVE_AUDIO: u32 = 1 << 5;
+   pub const NATIVE_VIDEO: u32 = 1 << 6;
+   pub const DOWNLOAD: u32 = 1 << 7;
+   pub const BUFFERING: u32 = 1 << 8;
+   pub const DEINTERLACE: u32 = 1 << 9;
+   pub const SOFT_COLORBALANCE: u32 = 1 << 10;
+   pub const FORCE_FILTERS: u32 = 1 << 11;
+   pub const FORCE_SW_DECODERS: u32 = 1 << 12;
 }

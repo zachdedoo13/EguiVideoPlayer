@@ -7,12 +7,12 @@ use eframe::egui::{CentralPanel, Frame, ImageSource, Key, Rect, Response, Sense,
 use eframe::egui::load::SizedTexture;
 use gstreamer::{ClockTime};
 use lazy_bastard::lazy_bastard;
-use crate::gstreamer_internals::backend_framework::GstreamerBackendFramework;
+use crate::gstreamer_internals::backend_framework::{GstreamerBackendFramework, PlayFlags};
 
 lazy_bastard!(
    pub struct SavedSettings {
       volume: f32 => 0.5,
-      scroll_speed_mult: f32 => 0.02,
+      scroll_speed_mult: f32 => 5.0,
    }
 );
 
@@ -23,38 +23,30 @@ lazy_bastard!(
    }
 );
 
-lazy_bastard!(
-   pub struct SetupSettings {
-      allow_user_to_open_other_media: bool => true,
-   }
-);
-
 pub struct VidioPlayer<B: GstreamerBackendFramework> {
    pub backend: Option<B>,
    display_texture: WgpuEguiDisplayTexture,
    saved_settings: SavedSettings,
    temp_settings: TempSettings,
-   setup_settings: SetupSettings,
 }
 
 /////////////////////
 //// CONSTRUCTORS ///
 /////////////////////
 impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
-   pub fn new(saved_settings: SavedSettings, setup_settings: SetupSettings) -> Self {
-      let backend = Backend::init(&*crate::URI_PATH_BROKO_BAD).unwrap();
+   pub fn new(saved_settings: SavedSettings) -> Self {
+      let backend = Backend::init(&*crate::URI_PATH_FRIEREN).unwrap();
 
       Self {
          backend: Some(backend),
          display_texture: WgpuEguiDisplayTexture::empty(),
          saved_settings,
          temp_settings: TempSettings::default(),
-         setup_settings,
       }
    }
 
-   pub fn new_with_uri(uri: &str, saved_settings: SavedSettings, setup_settings: SetupSettings) -> Result<Self> {
-      let mut player = VidioPlayer::new(saved_settings, setup_settings);
+   pub fn new_with_uri(uri: &str, saved_settings: SavedSettings) -> Result<Self> {
+      let mut player = VidioPlayer::new(saved_settings);
       player.open_uri(uri)?;
       Ok(player)
    }
@@ -164,10 +156,27 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
 
       ui.menu_button("playback", |ui| {
          ui.menu_button("speed", |ui| {
-            if ui.button("25%").clicked() { todo!() }
-            if ui.button("50%").clicked() { todo!() }
-            if ui.button("75%").clicked() { todo!() }
-            if ui.button("100%").clicked() { todo!() }
+            ui.horizontal(|ui| {
+               if ui.button("25% ").clicked() { self.mut_backend().change_playback_speed(0.25).unwrap(); }
+               if ui.button("50% ").clicked() { self.mut_backend().change_playback_speed(0.50).unwrap(); }
+               if ui.button("75% ").clicked() { self.mut_backend().change_playback_speed(0.75).unwrap(); }
+               if ui.button("100%").clicked() { self.mut_backend().change_playback_speed(1.00).unwrap(); }
+            });
+
+            ui.horizontal(|ui| {
+               if ui.button("125%").clicked() { self.mut_backend().change_playback_speed(1.25).unwrap(); }
+               if ui.button("150%").clicked() { self.mut_backend().change_playback_speed(1.50).unwrap(); }
+               if ui.button("175%").clicked() { self.mut_backend().change_playback_speed(1.75).unwrap(); }
+               if ui.button("200%").clicked() { self.mut_backend().change_playback_speed(2.00).unwrap(); }
+            });
+
+
+
+
+            let mut pbs = self.get_backend().current_playback_speed();
+            if ui.add(Slider::new(&mut pbs, 0.1..=5.0)).drag_stopped() {
+               self.mut_backend().change_playback_speed(pbs).unwrap();
+            }
          });
       });
 
@@ -218,15 +227,34 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
             }
          });
 
-         ui.menu_button("Audio devices", |_ui| {
+         ui.menu_button("Audio devices", |ui| {
+            let current_device = self.get_backend().get_current_audio_device();
+            for (name, id) in self.get_backend().list_audio_devices().unwrap() {
+               let mut is_hash = false;
+               if let Some(device) = &current_device {
+                  if device.as_str() == id {
+                     is_hash = true;
+                  }
+               }
+
+               if ui.button(format!("{name}{}", if is_hash {" #"} else {""})).clicked() {
+                  self.mut_backend().set_audio_device(id.as_str()).unwrap();
+               }
+            }
          });
 
-         ui.menu_button("Mode", |_ui| {
+         ui.menu_button("Mode", |ui| {
+            ui.label("Put surround sound settings or something hear");
          });
 
          ui.menu_button("Vol scroll speed", |ui| {
             ui.add(Slider::new(&mut self.saved_settings.scroll_speed_mult, 1.0..=20.0));
          });
+
+         let mut val = self.get_backend().get_current_volume();
+         if ui.add(Slider::new(&mut val, self.get_backend().get_volume_range())).hovered() {
+            self.mut_backend().set_volume(val).unwrap();
+         }
       });
 
       ui.menu_button("subtitles", |ui| {
@@ -254,20 +282,16 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
             }
          });
 
-         if ui.button("disable").clicked() {
-            self.mut_backend().toggle_subtitles(false).unwrap();
-         }
-
-         if ui.button("enable").clicked() {
-            self.mut_backend().toggle_subtitles(false).unwrap();
-         }
+         let mut bool = self.get_backend().get_playflag_state(PlayFlags::SUBTITLES).unwrap();
+         if ui.checkbox(&mut bool, "enabled").changed() {
+            self.mut_backend().toggle_playflag(bool, PlayFlags::SUBTITLES).unwrap();
+         };
       });
 
       ui.menu_button("tools", |ui| {
          if ui.button("open settings").clicked() {
             todo!()
          }
-
 
          if ui.button("Fullscreen").clicked() {
             self.temp_settings.queued_fullscreen_state = !self.temp_settings.queued_fullscreen_state;
@@ -287,13 +311,10 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
             // self.mut_backend().queue_frame_update();
          }
 
-
          if ui.button("Step_100_frame").clicked() {
             self.mut_backend().seek_frames(100).unwrap();
             // self.mut_backend().queue_frame_update();
          }
-
-
 
          if ui.button("Step_back_100_frame").clicked() {
             self.mut_backend().seek_frames(-100).unwrap();
@@ -370,13 +391,10 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
             let unit = raw_spd / 40.0;
 
             if unit != 0.0 {
-               // let digit = (unit * 0.01) * self.saved.scroll_speed_mult;
-               // if let Ok(c) = self.raw.gstreamer_player.get_volume() {
-               //    let set = (c + digit as f64).clamp(0.0, 1.0);
-               //    self.saved.volume = set as f32;
-               //    self.raw.gstreamer_player.set_volume(set).unwrap();
-               // }
-               // todo!()
+               let digit = (unit * 0.01) * self.saved_settings.scroll_speed_mult * 2.5;
+               let c = self.get_backend().get_current_volume();
+               let set = (c + digit as f64).clamp(0.0, *self.get_backend().get_volume_range().end());
+               self.mut_backend().set_volume(set).unwrap();
             }
          });
       }
@@ -449,22 +467,22 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
             if ui.add(Slider::new(&mut change, 0.0..=max).prefix("Keyframe ")).changed() {
                self.mut_backend().seek_timeline(
                   ClockTime::from_seconds_f64(change),
-                  false
-               ).unwrap();
-
-               self.mut_backend().queue_frame_update();
-            }
-
-            let mut change = self.get_backend().timecode().seconds_f64();
-            let max = self.get_backend().get_duration().unwrap().seconds_f64() - self.get_backend().get_frametime();
-            if ui.add(Slider::new(&mut change, 0.0..=max).prefix("Exact ")).changed() {
-               self.mut_backend().seek_timeline(
-                  ClockTime::from_seconds_f64(change),
                   true
                ).unwrap();
 
                self.mut_backend().queue_frame_update();
             }
+
+            // let mut change = self.get_backend().timecode().seconds_f64();
+            // let max = self.get_backend().get_duration().unwrap().seconds_f64() - self.get_backend().get_frametime();
+            // if ui.add(Slider::new(&mut change, 0.0..=max).prefix("Exact ")).changed() {
+            //    self.mut_backend().seek_timeline(
+            //       ClockTime::from_seconds_f64(change),
+            //       true
+            //    ).unwrap();
+            //
+            //    self.mut_backend().queue_frame_update();
+            // }
          })
       });
    }

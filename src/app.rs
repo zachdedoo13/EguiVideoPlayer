@@ -1,7 +1,7 @@
 use eframe::{App, Renderer};
 use eframe::egui::{CentralPanel, Context, Frame};
 use vid_v2::gstreamer_internals::backend_v2::BackendV2;
-use vid_v2::gui::player::{SavedSettings, SetupSettings, VidioPlayer};
+use vid_v2::gui::player::{SavedSettings, VidioPlayer};
 
 fn main() {
    let native_options = eframe::NativeOptions {
@@ -11,7 +11,7 @@ fn main() {
    eframe::run_native(
       "Video player",
       native_options, Box::new(|_| Ok(Box::new(TestApp {
-         player: VidioPlayer::new(SavedSettings::default(), SetupSettings::default()),
+         player: VidioPlayer::new(SavedSettings::default()),
       }))),
    ).unwrap();
 }

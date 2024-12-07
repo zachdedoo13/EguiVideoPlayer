@@ -2,16 +2,19 @@ use crate::fraction_to_f64;
 use crate::gstreamer_internals::backend_framework::GstreamerBackendFramework;
 use crate::gstreamer_internals::prober::Probe;
 use crate::gstreamer_internals::update::FrameUpdate;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use crossbeam_channel::Receiver;
-use gstreamer::ffi::GstPipeline;
+use gstreamer::ffi::GstObject;
 use gstreamer::glib::gobject_ffi::{g_object_get, g_object_set, GObject};
 use gstreamer::glib::translate::ToGlibPtr;
-use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstObjectExt, ObjectExt};
-use gstreamer::{Caps, ClockTime, Element, ElementFactory, FlowSuccess, Pipeline, SeekFlags, SeekType, State};
+use gstreamer::glib::ParamFlags;
+use gstreamer::prelude::{Cast, ElementExt, ElementExtManual, GstBinExtManual, GstObjectExt, IsA, ObjectExt};
+use gstreamer::{Bin, Caps, ClockTime, Element, ElementFactory, FlowSuccess, Object, Pipeline, SeekFlags, SeekType, State};
 use gstreamer_app::AppSink;
-use gstreamer_video::{VideoInfo};
+use gstreamer_video::glib::Value;
+use gstreamer_video::VideoInfo;
 use std::ffi::CString;
+use std::ops::RangeInclusive;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -30,6 +33,11 @@ pub struct BackendV2 {
    frame_queue_info: FrameQueueInfo,
 
    playback_speed: f64,
+
+   volume: Element,
+   current_volume: f64,
+   audio_sink: Element,
+   current_audio_device: Option<String>,
 }
 
 impl Drop for BackendV2 {
@@ -43,6 +51,48 @@ impl BackendV2 {
       self.latest_info = Some(inny.1);
       self.latest_timecode = inny.0.timecode;
       inny.0
+   }
+
+   fn make_audio_sink(device: Option<&str>) -> Result<(Bin, Element, Element)> {
+      // Create a new Bin
+      let bin = Bin::new();
+
+      // Create elements
+      let audio_convert = ElementFactory::make("audioconvert").build()?;
+      let audio_resample = ElementFactory::make("audioresample").build()?;
+      let volume = ElementFactory::make("volume").build()?;
+
+      #[cfg(target_os = "windows")]
+      let audio_sink = ElementFactory::make("wasapisink")
+          .name("audio-sink")
+          .build()?;
+
+      #[cfg(not(target_os = "windows"))]
+      let audio_sink = ElementFactory::make("autoaudiosink")
+          .name("audio-sink")
+          .build()?;
+
+      #[cfg(target_os = "windows")]
+      if let Some(device) = device {
+         audio_sink.set_property("device", device);
+      }
+
+      probe_props(&audio_sink);
+      probe_props(&volume);
+
+      // Add elements to the Bin
+      bin.add_many(&[&audio_convert, &audio_resample, &volume, &audio_sink])?;
+
+      // Link elements together
+      Element::link_many(&[&audio_convert, &audio_resample, &volume, &audio_sink])?;
+
+      // Add a ghost pad to the Bin to expose the audio_convert's sink pad
+      let ghost_pad = gstreamer::GhostPad::with_target(
+         &audio_convert.static_pad("sink").unwrap()
+      )?;
+      bin.add_pad(&ghost_pad)?;
+
+      Ok((bin, volume, audio_sink))
    }
 }
 
@@ -73,8 +123,11 @@ impl GstreamerBackendFramework for BackendV2 {
       appsink.set_property("caps", &caps);
       pipeline.set_property("video-sink", &appsink);
 
-      // settings
 
+      // audio sink
+
+      let (audio_bin, volume, audio_sink) = Self::make_audio_sink(None)?;
+      pipeline.set_property("audio-sink", &audio_bin);
 
       // updater
       let (update_sender, update_receiver)
@@ -140,6 +193,10 @@ impl GstreamerBackendFramework for BackendV2 {
             in_progress: false,
          },
          playback_speed: 1.0,
+         volume,
+         current_volume: 2.5,
+         audio_sink,
+         current_audio_device: None,
       };
 
       // ensures it starts in paused state
@@ -398,42 +455,133 @@ impl GstreamerBackendFramework for BackendV2 {
       Ok(())
    }
 
+   fn set_audio_device(&mut self, device: &str) -> Result<()> {
+      #[cfg(target_os = "windows")]
+      {
+         // Set the pipeline state to NULL
+         self.pipeline.set_state(State::Null)?;
+
+         // Remove the current audio-sink
+         self.pipeline.set_property("audio-sink", None::<&Element>);
+
+         // Create a new audio-sink
+         let (new_audio_bin, new_volume, new_audio_sink) = Self::make_audio_sink(Some(device))?;
+
+         // Set the new audio-sink to the pipeline
+         self.pipeline.set_property("audio-sink", &new_audio_bin);
+
+         // Update the audio_sink and volume fields
+         self.audio_sink = new_audio_sink;
+         self.volume = new_volume;
+
+         // Set the pipeline state back to PLAYING or the desired state
+         self.pipeline.set_state(self.target_state)?;
+
+         // wait till state change is successful
+         let _ = self.pipeline.state(ClockTime::MAX);
+
+         self.seek_time(SeekFlags::FLUSH | SeekFlags::ACCURATE, self.latest_timecode)?;
+
+         println!("Audio device change success");
+         self.current_audio_device = Some(device.to_string());
+
+         Ok(())
+      }
+
+      #[cfg(not(target_os = "windows"))]
+      {
+         // println!("Set audio device only works on windows");
+         // bail!("Set audio device only works on windows");
+
+         compile_error!("Set audio device only works on windows")
+      }
+   }
+
+   fn list_audio_devices(&self) -> Result<Vec<(String, String)>> {
+      #[cfg(target_os = "windows")]
+      {
+         let mut out = vec![];
+
+         let device_collection = wasapi::DeviceCollection::new(&wasapi::Direction::Render).ok().context("Couldn't get collection")?;
+         for res in device_collection.into_iter() {
+            if let Ok(device) = res {
+               let name = device.get_friendlyname().ok().context("Couldn't get friendly name")?;
+               let id = device.get_id().ok().context("Couldn't get friendly id")?;
+               out.push((name, id));
+            }
+         }
+
+         Ok(out)
+      }
+
+      #[cfg(not(target_os = "windows"))]
+      {
+         // println!("Set audio device only works on windows");
+         // bail!("Set audio device only works on windows");
+
+         compile_error!("List audio devices only works on windows")
+      }
+   }
+
+   fn get_current_audio_device(&self) -> Option<String> {
+      self.current_audio_device.clone()
+   }
+
+   fn get_current_volume(&self) -> f64 {
+      self.current_volume
+   }
+
+   fn get_volume_range(&self) -> RangeInclusive<f64> {
+      0.0..=5.0
+   }
+
+   fn set_volume(&mut self, to: f64) -> Result<()> {
+      self.current_volume = to;
+      self.volume.set_property("volume", to);
+      Ok(())
+   }
+
    //////////////////////
    // Subtitle Methods //
    //////////////////////
 
-   fn toggle_subtitles(&mut self, set_to: bool) -> Result<()> {
-      // self.pipeline.set_property("current-text", -1);
-      // self.pipeline.set_property("suburi", "data:text/plain;base64,");
-
-      // self.pipeline.set_property("flags", 0u32);
-
-      let pipeline = &self.pipeline;
-      let gst_pipeline: *mut GstPipeline = pipeline.to_glib_none().0;
-      let gobject_ptr: *mut GObject = gst_pipeline as *mut GObject;
+   fn toggle_playflag(&mut self, set_to: bool, flag: u32) -> Result<()> {
+      let gobject_ptr = to_g_obj_pointer(self.pipeline.clone())?;
 
       let property_name = CString::new("flags")?;
       let mut flags: u32 = 0;
 
-      const GST_PLAY_FLAG_TEXT: u32 = 1 << 2;
-
       unsafe {
          g_object_get(gobject_ptr, property_name.as_ptr(), &mut flags as *mut u32 as *mut _, std::ptr::null::<i32>());
-         println!("Current flags: {:b}", flags);
 
          if set_to {
-            flags |= !GST_PLAY_FLAG_TEXT;
-            todo!()
+            flags |= flag;
          } else {
-            flags &= !GST_PLAY_FLAG_TEXT;
+            flags &= !flag;
          }
-
-         // flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO | GST_PLAY_FLAG_TEXT;
 
          g_object_set(gobject_ptr, property_name.as_ptr(), flags, std::ptr::null::<i32>());
       }
 
       Ok(())
+   }
+
+   fn get_playflag_state(&self, flag: u32) -> Result<bool> {
+      let gobject_ptr = to_g_obj_pointer(self.pipeline.clone())?;
+
+      let property_name = CString::new("flags")?;
+      let mut flags: u32 = 0;
+
+      let res = unsafe {
+         g_object_get(
+            gobject_ptr,
+            property_name.as_ptr(),
+            &mut flags as *mut u32 as *mut _, std::ptr::null::<i32>(),
+         );
+         (flags & flag) != 0
+      };
+
+      Ok(res)
    }
 }
 
@@ -442,11 +590,27 @@ fn probe_props(element: &Element) {
    let props = element.list_properties();
    println!("\nProps of {}---------------", element.name().as_str());
    for prop in props {
-      println!("Property: {} - Type: {:?}", prop.name(), prop.value_type())
+      if prop.flags().contains(ParamFlags::READABLE) {
+         let value: Value = element.property(prop.name());
+         println!("Property: {} - Type: {:?} = ({value:?})", prop.name(), prop.value_type())
+      } else {
+         println!("Property: {} - Type: {:?}, VALUE NOT READABLE", prop.name(), prop.value_type())
+      }
    }
 
    println!("End-----------------------\n");
 }
+
+fn to_g_obj_pointer<T>(to_object: T) -> Result<*mut GObject>
+where
+    T: IsA<Object> + Cast,
+{
+   let object = to_object.dynamic_cast::<Object>().unwrap();
+   let ptr: *mut GstObject = object.to_glib_none().0;
+   let gobject_ptr: *mut GObject = ptr as *mut GObject;
+   Ok(gobject_ptr)
+}
+
 
 struct FrameQueueInfo {
    queued: bool,
