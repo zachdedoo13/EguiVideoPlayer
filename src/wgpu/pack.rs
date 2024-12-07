@@ -39,3 +39,4 @@ impl TryFrom<&Frame> for WgpuRenderPack {
      Ok(WgpuRenderPack::from_eframe_renderstate(frame.wgpu_render_state().context("Wgpu Not Enabled")?))
    }
 }
+

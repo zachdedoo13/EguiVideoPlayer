@@ -137,27 +137,6 @@ impl Inner {
          render_state.queue.submit(Some(encoder.finish()));
       }
 
-      // direct write to tex
-      {
-         // render_state.queue.write_texture(
-         //    ImageCopyTexture {
-         //       texture: &self.texture,
-         //       mip_level: 0,
-         //       origin: Origin3d::ZERO,
-         //       aspect: TextureAspect::All,
-         //    },
-         //    &data,
-         //    ImageDataLayout {
-         //       offset: 0,
-         //       bytes_per_row: Some(self.texture.width() * 4),
-         //       rows_per_image: Some(self.texture.height()),
-         //    },
-         //    self.texture.size(),
-         // );
-         //
-         // render_state.queue.submit([]);
-      }
-
       Ok(())
    }
 }
@@ -213,3 +192,4 @@ impl WgpuEguiDisplayTexture {
       self.inner = None;
    }
 }
+

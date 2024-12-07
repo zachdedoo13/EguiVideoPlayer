@@ -51,9 +51,18 @@ impl Probe {
          let bitrate = Some(video_stream.bitrate());
          let max_bitrate = Some(video_stream.max_bitrate());
          let resolution = Some((video_stream.width(), video_stream.height()));
-         let name = video_stream.tags().and_then(|t| t.get::<Title>().map(|f| f.get().to_string()));
-         let codec = video_stream.tags().and_then(|t| t.get::<VideoCodec>().map(|f| f.get().to_string()));
-         let index = video_stream.tags().and_then(|t| t.get::<gstreamer::tags::ContainerSpecificTrackId>().map(|f| f.get().to_string().parse::<u32>().ok())).flatten();
+
+         let name = video_stream
+             .tags()
+             .and_then(|t| t.get::<Title>().map(|f| f.get().to_string()));
+
+         let codec = video_stream
+             .tags()
+             .and_then(|t| t.get::<VideoCodec>().map(|f| f.get().to_string()));
+
+         let index = video_stream
+             .tags()
+             .and_then(|t| t.get::<gstreamer::tags::ContainerSpecificTrackId>().map(|f| f.get().to_string().parse::<u32>().ok())).flatten();
 
          let s_out = VideoStream {
             name,

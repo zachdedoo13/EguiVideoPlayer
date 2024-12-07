@@ -66,6 +66,10 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
 //// Public METHODS ///
 ///////////////////////
 impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
+
+   /// displays the player,
+   /// requires wgpu to be enabled unless someone makes a wrapper over ``WgpuEguiDisplayTexture``
+   /// to support both the ``WgpuRenderPack`` and a new ``GlowRenderPack`` in the form of another ``RenderPackWrapper``
    pub fn show<R: Into<WgpuRenderPack>>(
       &mut self,
       ui: &mut Ui,
@@ -169,9 +173,6 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
                if ui.button("175%").clicked() { self.mut_backend().change_playback_speed(1.75).unwrap(); }
                if ui.button("200%").clicked() { self.mut_backend().change_playback_speed(2.00).unwrap(); }
             });
-
-
-
 
             let mut pbs = self.get_backend().current_playback_speed();
             if ui.add(Slider::new(&mut pbs, 0.1..=5.0)).drag_stopped() {
@@ -487,3 +488,4 @@ impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
       });
    }
 }
+
