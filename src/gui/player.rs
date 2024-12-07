@@ -35,7 +35,7 @@ pub struct VidioPlayer<B: GstreamerBackendFramework> {
 /////////////////////
 impl<Backend: GstreamerBackendFramework> VidioPlayer<Backend> {
    pub fn new(saved_settings: SavedSettings) -> Self {
-      let backend = Backend::init(&*crate::URI_PATH_FRIEREN).unwrap();
+      let backend = Backend::init(&*crate::URI_PATH_BROKO_BAD).unwrap();
 
       Self {
          backend: Some(backend),

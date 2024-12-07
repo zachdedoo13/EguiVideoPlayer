@@ -29,4 +29,6 @@ url = "2.5.4"
 
 egui_logger = "0.6.1"
 
+# windows spacific
 wasapi = "0.15.0"
+winapi = { version = "0.3", features = ["winuser", "winbase", "winnt"] }

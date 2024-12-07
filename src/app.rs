@@ -4,6 +4,8 @@ use vid_v2::gstreamer_internals::backend_v2::BackendV2;
 use vid_v2::gui::player::{SavedSettings, VidioPlayer};
 
 fn main() {
+   vid_v2::sleep_directives::prevent_sleep();
+
    let native_options = eframe::NativeOptions {
       renderer: Renderer::Wgpu,
       ..Default::default()

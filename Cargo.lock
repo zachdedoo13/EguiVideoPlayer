@@ -3340,6 +3340,7 @@ dependencies = [
  "log",
  "url",
  "wasapi",
+ "winapi",
 ]
 
 [[package]]

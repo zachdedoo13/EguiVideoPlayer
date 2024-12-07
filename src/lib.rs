@@ -5,6 +5,7 @@ use anyhow::Context;
 use gstreamer::Fraction;
 use url::Url;
 
+
 pub mod gstreamer_internals {
     pub mod update;
     pub mod prober;
@@ -32,6 +33,25 @@ fn fraction_to_f64(fraction: Fraction) -> f64 {
     fraction.numer() as f64 / fraction.denom() as f64
 }
 
+#[cfg(target_os = "windows")]
+pub mod sleep_directives {
+    use winapi::um::winbase::SetThreadExecutionState;
+    use winapi::um::winnt::{ES_CONTINUOUS, ES_DISPLAY_REQUIRED};
+    use winapi::um::winnt::ES_SYSTEM_REQUIRED;
+    pub fn prevent_sleep() {
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+        }
+    }
+
+    pub fn allow_sleep() {
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+    }
+}
+
+
 
 // test_uris
 pub const URI_ONLINE_CAR: LazyCell<String> = LazyCell::new(||
@@ -43,6 +63,6 @@ pub const URI_PATH_HELLS_PARADISE: LazyCell<String> = LazyCell::new(||
     path_to_uri(Path::new("E:/TorrentArchive/AnimeLibary/Jigokuraku S01 (BD 1080p AV1) [Dual-Audio] [MiniVodes]/Jigokuraku - S01E04 (BD 1080p AV1) [MiniVodes].mkv")).unwrap());
 
 pub const URI_PATH_BROKO_BAD: LazyCell<String> = LazyCell::new(||
-    path_to_uri(Path::new("E:/TorrentArchive/ShowLibary/Breaking.Bad.S01-S05.1080p.NF.WEB-DL.AV1.EAC3/Breaking Bad Season 2/Breaking.Bad.S02E01.Seven.Thirty-Seven.1080p.NF.WEB-DL.AV1.EAC3.mkv")).unwrap());
+    path_to_uri(Path::new("E:/TorrentArchive/ShowLibary/Breaking.Bad.S01-S05.1080p.NF.WEB-DL.AV1.EAC3/Breaking Bad Season 2/Breaking.Bad.S02E02.Grilled.1080p.NF.WEB-DL.AV1.EAC3.mkv")).unwrap());
 
 
