@@ -32,3 +32,8 @@ egui_logger = "0.6.1"
 # windows spacific
 wasapi = "0.15.0"
 winapi = { version = "0.3", features = ["winuser", "winbase", "winnt"] }
+
+[dev-dependencies]
+terminal_framebuffer = { path = "../terminal_framebuffer" } #todo upload to crates.io
+glam = "0.29.2"
+rayon = "1.10.0"
